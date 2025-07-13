@@ -16,6 +16,7 @@ enum JSONValueKind {
 typedef struct JSONValueString {
 	char *buffer;
 	size_t len;
+	size_t capacity;
 } JSONValueString;
 
 typedef struct JSONValueArray {
@@ -50,7 +51,8 @@ enum JSONValueResultKind {
 };
 
 enum JSONValueResultError {
-	JSON_VALUE_RESULT_ERROR_PARSE_FAILED
+	JSON_VALUE_RESULT_ERROR_PARSE_FAILED,
+	JSON_VALUE_RESULT_ERROR_OUT_OF_MEMORY
 };
 
 typedef struct JSONValueResult {

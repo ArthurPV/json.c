@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <assert.h>
 
 #include "json.h"
 
@@ -14,14 +15,23 @@ struct JSONContentIterator {
 static inline struct JSONContentIterator
 init__JSONContentIterator(const char *content, size_t len);
 
-char
+static char
 next__JSONContentIterator(struct JSONContentIterator *self);
 
-char
+static char
 current__JSONContentIterator(struct JSONContentIterator *self);
 
+static bool
+expect__JSONContentIterator(struct JSONContentIterator *self, char expected);
+
 static inline JSONValueString
-init__JSONValueString(char *buffer, size_t len);
+init__JSONValueString(void);
+
+static bool
+push__JSONValueString(JSONValueString *self, char c);
+
+static inline bool
+is_empty__JSONValueString(JSONValueString *self);
 
 static inline void
 deinit__JSONValueString(const JSONValueString *self);
@@ -34,6 +44,9 @@ deinit__JSONValueArray(const JSONValueArray *self);
 
 static inline JSONValueObjectKeyValue
 init__JSONValueObjectKeyValue(JSONValueString key, struct JSONValue *value);
+
+static bool
+push__JSONValueObjectKeyValue(JSONValueObjectKeyValue **self);
 
 static void
 deinit__JSONValueObjectKeyValue(const JSONValueObjectKeyValue *self);
@@ -71,11 +84,23 @@ init_ok__JSONValueResult(JSONValue value);
 static inline JSONValueResult
 init_err__JSONValueResult(enum JSONValueResultError kind, const char *msg);
 
+static inline bool
+is_err__JSONValueResult(const JSONValueResult *self);
+
+static inline const JSONValue *
+unwrap__JSONValueResult(const JSONValueResult *self);
+
 static void
 deinit__JSONValueResult(const JSONValueResult *self);
 
 static JSONValueResult
-parse_key__JSON(char **current);
+parse_name__JSON(struct JSONContentIterator *iter);
+
+static JSONValueResult
+parse_key__JSON(struct JSONContentIterator *iter);
+
+static JSONValueResult
+parse_value__JSON(struct JSONContentIterator *iter);
 
 static JSONValueResult
 parse_content__JSON(const char *content, size_t content_len);
@@ -110,13 +135,51 @@ current__JSONContentIterator(struct JSONContentIterator *self)
 	return self->content[self->count];
 }
 
+bool
+expect__JSONContentIterator(struct JSONContentIterator *self, char expected)
+{
+	if (current__JSONContentIterator(self) == expected) {
+		next__JSONContentIterator(self);
+
+		return true;
+	}
+
+	return false;
+}
+
 JSONValueString
-init__JSONValueString(char *buffer, size_t len)
+init__JSONValueString(void)
 {
 	return (JSONValueString){
-		.buffer = buffer,
-		.len = len
+		.buffer = NULL,
+		.len = 0,
+		.capacity = 8,
 	};
+}
+
+bool
+push__JSONValueString(JSONValueString *self, char c)
+{
+	if (!self->buffer) {
+		self->buffer = malloc(self->capacity);	
+	} else if (self->len == self->capacity) {
+		self->capacity *= 2;
+		self->buffer = realloc(self->buffer, self->capacity);
+	}
+
+	if (!self->buffer) {
+		return false;
+	}
+
+	self->buffer[self->len++] = c;
+
+	return true;
+}
+
+bool
+is_empty__JSONValueString(JSONValueString *self)
+{
+	return self->len == 0;
 }
 
 void
@@ -280,6 +343,20 @@ init_err__JSONValueResult(enum JSONValueResultError kind, const char *msg)
 	};
 }
 
+bool
+is_err__JSONValueResult(const JSONValueResult *self)
+{
+	return self->kind == JSON_VALUE_RESULT_KIND_ERR;
+}
+
+const JSONValue *
+unwrap__JSONValueResult(const JSONValueResult *self)
+{
+	assert(self->kind == JSON_VALUE_RESULT_KIND_ERR && "expected ok");
+
+	return &self->ok;
+}
+
 void
 deinit__JSONValueResult(const JSONValueResult *self)
 {
@@ -297,6 +374,50 @@ deinit__JSONValueResult(const JSONValueResult *self)
 }
 
 JSONValueResult
+parse_name__JSON(struct JSONContentIterator *iter)
+{
+	JSONValueString name = init__JSONValueString();
+	char current = current__JSONContentIterator(iter);
+
+	while (current && current != '"') {
+		if (!push__JSONValueString(&name, current)) {
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_OUT_OF_MEMORY, "Out of memory");
+		}
+
+		current = next__JSONContentIterator(iter);
+	}
+
+	if (!expect__JSONContentIterator(iter, '"')) {
+		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `\"`");
+	}
+
+	return init_ok__JSONValueResult(init_string__JSONValue(name));
+}
+
+JSONValueResult
+parse_key__JSON(struct JSONContentIterator *iter)
+{
+	assert(expect__JSONContentIterator(iter, '"') && "unreachable");
+
+	JSONValueResult name_result = parse_name__JSON(iter);
+
+	if (is_err__JSONValueResult(&name_result)) {
+		return name_result;
+	}
+
+	if (!expect__JSONContentIterator(iter, ':')) {
+		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `:`");
+	}
+
+	return name_result;
+}
+
+JSONValueResult
+parse_value__JSON(struct JSONContentIterator *iter)
+{
+}
+
+JSONValueResult
 parse_content__JSON(const char *content, size_t content_len)
 {
 	struct JSONContentIterator iter = init__JSONContentIterator(content, content_len);
@@ -304,11 +425,25 @@ parse_content__JSON(const char *content, size_t content_len)
 	next__JSONContentIterator(&iter); // Skip `{`
 
 	char current = '\0';
+	JSONValueObjectKeyValue *object_key_value = NULL;
 	
 	while ((current = next__JSONContentIterator(&iter))) {
 		switch (current) {
-			case '\"':
+			case '\"': {
+				JSONValueResult key_result = parse_key__JSON(&iter);
+
+				if (is_err__JSONValueResult(&key_result)) {
+					return key_result;
+				}
+
+				JSONValueResult value_result = parse_value__JSON(&iter);
+
+				if (is_err__JSONValueResult(&value_result)) {
+					return value_result;
+				}
+
 				break;
+			}
 			default:
 				if (isspace(current)) {
 					continue;
