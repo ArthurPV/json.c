@@ -3,8 +3,13 @@
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
+#include <stdint.h>
 
 #include "json.h"
+
+#define FATAL(msg, ...) \
+	fprintf(stderr, msg, ##__VA_ARGS__); \
+	exit(1);
 
 struct JSONContentIterator {
 	const char *content;
@@ -16,9 +21,18 @@ static inline struct JSONContentIterator
 init__JSONContentIterator(const char *content, size_t len);
 
 static char
-next__JSONContentIterator(struct JSONContentIterator *self);
+next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count);
 
 static char
+current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count);
+
+static uint32_t
+read_bytes__JSONContentIterator(struct JSONContentIterator *self, char (*get_character)(struct JSONContentIterator *self, uint8_t byte_count));
+
+static inline uint32_t
+next__JSONContentIterator(struct JSONContentIterator *self);
+
+static inline uint32_t 
 current__JSONContentIterator(struct JSONContentIterator *self);
 
 static bool
@@ -28,7 +42,7 @@ static inline JSONValueString
 init__JSONValueString(void);
 
 static bool
-push__JSONValueString(JSONValueString *self, char c);
+push__JSONValueString(JSONValueString *self, uint32_t c);
 
 static inline bool
 is_empty__JSONValueString(JSONValueString *self);
@@ -116,23 +130,90 @@ init__JSONContentIterator(const char *content, size_t len)
 }
 
 char
-next__JSONContentIterator(struct JSONContentIterator *self)
+next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count)
 {
 	if (self->count >= self->len) {
-		return '\0';
+		if (byte_count == 0) {
+			return '\0';
+		} else {
+			FATAL("Malformed character");
+		}
 	}
 
 	return self->content[++self->count];
 }
 
 char
-current__JSONContentIterator(struct JSONContentIterator *self)
+current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count)
 {
-	if (self->count >= self->len) {
-		return '\0';
+	if (self->count + byte_count >= self->len) {
+		if (byte_count == 0) {
+			return '\0';
+		} else {
+			FATAL("Malformed character");
+		}
 	}
 
-	return self->content[self->count];
+	return self->content[self->count + byte_count];
+}
+
+uint32_t
+read_bytes__JSONContentIterator(struct JSONContentIterator *self, char (*get_character)(struct JSONContentIterator *self, uint8_t byte_count))
+{
+	char c1 = get_character(self, 1);
+	uint32_t res;
+
+	// See RFC 3629:
+	//
+	// 3.  UTF-8 definition
+	//
+	// [...]
+    // 
+    // Char. number range  |        UTF-8 octet sequence
+    //    (hexadecimal)    |              (binary)
+    // --------------------+---------------------------------------------
+    // 0000 0000-0000 007F | 0xxxxxxx
+    // 0000 0080-0000 07FF | 110xxxxx 10xxxxxx
+    // 0000 0800-0000 FFFF | 1110xxxx 10xxxxxx 10xxxxxx
+    // 0001 0000-0010 FFFF | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+	if ((c1 & 0x80) == 0) {
+		res = c1;
+	} else if ((c1 & 0xE0) == 0xC0) {
+		char c2 = get_character(self, 2);
+
+		res = (c1 & 0x1F) << 6 | c2 & 0x3F;
+	} else if ((c1 & 0xF0) == 0xE0) {
+		char c2 = get_character(self, 2);
+		char c3 = get_character(self, 3);
+
+		res = (c1 & 0xF) << 12 | (c2 & 0x3F) << 6 | c3 & 0x3F;
+	} else if ((c1 & 0xF8) == 0xF0) {
+		char c2 = get_character(self, 2);
+		char c3 = get_character(self, 3);
+		char c4 = get_character(self, 4);
+
+		res = (c1 & 0x7) << 18 | (c2 & 0x3F) << 12 | (c3 & 0x3F) << 6 | c4 & 0x3F;
+	} else {
+		FATAL("Invalid character: %c", c1);
+	}
+
+	if (res > 0x10FFFF) {
+		FATAL("Invalid character (codepoint): %d", res);
+	}
+
+	return res;
+}
+
+uint32_t
+next__JSONContentIterator(struct JSONContentIterator *self)
+{
+	return read_bytes__JSONContentIterator(self, &next_character__JSONContentIterator);
+}
+
+uint32_t
+current__JSONContentIterator(struct JSONContentIterator *self)
+{
+	return read_bytes__JSONContentIterator(self, &current_character__JSONContentIterator);
 }
 
 bool
@@ -158,11 +239,25 @@ init__JSONValueString(void)
 }
 
 bool
-push__JSONValueString(JSONValueString *self, char c)
+push__JSONValueString(JSONValueString *self, uint32_t c)
 {
+	uint8_t byte_count;
+
+	if (c <= 0x7F) {
+		byte_count = 1;
+	} else if (c <= 0x7FF) {
+		byte_count = 2;
+	} else if (c <= 0xFFFF) {
+		byte_count = 3;
+	} else if (c <= 0x10FFFF) {
+		byte_count = 4;
+	} else {
+		assert(0 && "unreachable: invalid codepoint");
+	}
+
 	if (!self->buffer) {
 		self->buffer = malloc(self->capacity);	
-	} else if (self->len == self->capacity) {
+	} else if (self->len + byte_count + 1 == self->capacity) {
 		self->capacity *= 2;
 		self->buffer = realloc(self->buffer, self->capacity);
 	}
@@ -171,7 +266,34 @@ push__JSONValueString(JSONValueString *self, char c)
 		return false;
 	}
 
-	self->buffer[self->len++] = c;
+	switch (byte_count) {
+		case 1:
+			self->buffer[self->len++] = c;
+
+			break;
+		case 2:
+			self->buffer[self->len++] = ((c >> 6 ) & 0x1F) | 0xC0;
+			self->buffer[self->len++] = (c & 0x3F) | 0x80;
+
+			break;
+		case 3:
+			self->buffer[self->len++] = ((c >> 12) & 0xF) | 0xE0;
+			self->buffer[self->len++] = ((c >> 6) & 0x3F) | 0x80;
+			self->buffer[self->len++] = (c & 0x3F) | 0x80;
+
+			break;
+		case 4:
+			self->buffer[self->len++] = ((c >> 18) & 0x7) | 0xF0;
+			self->buffer[self->len++] = ((c >> 12) & 0x3F) | 0x80;
+			self->buffer[self->len++] = ((c >> 6) & 0x3F) | 0x80;
+			self->buffer[self->len++] = (c & 0x3F) | 0x80;
+
+			break;
+		default:
+			assert(0 && "unreachable");
+	}
+
+	self->buffer[self->len] = 0;
 
 	return true;
 }
@@ -377,7 +499,7 @@ JSONValueResult
 parse_name__JSON(struct JSONContentIterator *iter)
 {
 	JSONValueString name = init__JSONValueString();
-	char current = current__JSONContentIterator(iter);
+	uint32_t current = current__JSONContentIterator(iter);
 
 	while (current && current != '"') {
 		if (!push__JSONValueString(&name, current)) {
