@@ -29,9 +29,14 @@ typedef struct JSONValueObjectKeyValue {
 	struct JSONValue *value;
 } JSONValueObjectKeyValue;
 
-typedef struct JSONValueObject {
+typedef struct JSONValueObjectKeyValueMap {
 	JSONValueObjectKeyValue *buffer;
 	size_t len;
+	size_t capacity;
+} JSONValueObjectKeyValueMap;
+
+typedef struct JSONValueObject {
+	JSONValueObjectKeyValueMap map;
 } JSONValueObject;
 
 typedef struct JSONValue {
