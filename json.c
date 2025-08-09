@@ -123,15 +123,6 @@ init_ok__JSONValueResult(JSONValue value);
 static inline JSONValueResult
 init_err__JSONValueResult(enum JSONValueResultError kind, const char *msg);
 
-static inline bool
-is_err__JSONValueResult(const JSONValueResult *self);
-
-static inline const JSONValue *
-unwrap__JSONValueResult(const JSONValueResult *self);
-
-static void
-deinit__JSONValueResult(const JSONValueResult *self);
-
 static JSONValueResult
 parse_array_value__JSON(struct JSONContentIterator *iter);
 

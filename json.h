@@ -72,6 +72,15 @@ typedef struct JSONValueResult {
 	};
 } JSONValueResult;
 
+static inline bool
+is_err__JSONValueResult(const JSONValueResult *self);
+
+static inline const JSONValue *
+unwrap__JSONValueResult(const JSONValueResult *self);
+
+void
+deinit__JSONValueResult(const JSONValueResult *self);
+
 JSONValueResult
 parse__JSON(const char *content, size_t content_len);
 
