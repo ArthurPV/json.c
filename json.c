@@ -8,11 +8,11 @@
 #include "json.h"
 
 #define FATAL(msg, ...) \
-	fprintf(stderr, "FATAL(%d): "msg, __LINE__, ##__VA_ARGS__); \
+	fprintf(stderr, "FATAL(%d): "msg"\n", __LINE__, ##__VA_ARGS__); \
 	exit(1);
 
 #define UNREACHABLE(msg, ...) \
-	fprintf(stderr, "UNREACHABLE(%d): "msg, __LINE__, ##__VA_ARGS__); \
+	fprintf(stderr, "UNREACHABLE(%d): "msg"\n", __LINE__, ##__VA_ARGS__); \
 	exit(1);
 
 struct JSONContentIterator {
@@ -24,14 +24,17 @@ struct JSONContentIterator {
 static inline struct JSONContentIterator
 init__JSONContentIterator(const char *content, size_t len);
 
-static char
+static unsigned char
 next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count);
 
-static char
+static unsigned char
 current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count);
 
+static uint8_t
+count_byte__JSONContentIterator(struct JSONContentIterator *self);
+
 static uint32_t
-read_bytes__JSONContentIterator(struct JSONContentIterator *self, char (*get_character)(struct JSONContentIterator *self, uint8_t byte_count));
+read_bytes__JSONContentIterator(struct JSONContentIterator *self, unsigned char (*get_character)(struct JSONContentIterator *self, uint8_t byte_count));
 
 static inline uint32_t
 next__JSONContentIterator(struct JSONContentIterator *self);
@@ -57,8 +60,14 @@ eq__JSONValueString(const JSONValueString *self, const JSONValueString *other);
 static bool
 push__JSONValueString(JSONValueString *self, uint32_t c);
 
+static bool
+push_characters__JSONValueString(JSONValueString *self, char *s, size_t s_len);
+
 static inline bool
-is_empty__JSONValueString(JSONValueString *self);
+is_empty__JSONValueString(const JSONValueString *self);
+
+static void
+to_string__JSONValueString(const JSONValueString *self, JSONValueString *res);
 
 static inline void
 deinit__JSONValueString(const JSONValueString *self);
@@ -97,7 +106,7 @@ static inline void
 deinit__JSONValueObject(const JSONValueObject *self);
 
 static inline JSONValue
-init_number__JSONValue(double number);
+init_number__JSONValue(JSONValueString number);
 
 static inline JSONValue
 init_string__JSONValue(JSONValueString string);
@@ -113,6 +122,9 @@ init_object__JSONValue(JSONValueObject object);
 
 static inline JSONValue
 init_null__JSONValue();
+
+static void
+to_string_base__JSONValue(const JSONValue *self, JSONValueString *res);
 
 static void
 deinit__JSONValue(const JSONValue *self);
@@ -197,7 +209,7 @@ init__JSONContentIterator(const char *content, size_t len)
 	};
 }
 
-char
+unsigned char
 next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count)
 {
 	if (self->count >= self->len) {
@@ -208,10 +220,10 @@ next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t by
 		}
 	}
 
-	return self->content[++self->count];
+	return self->content[++self->count] & 0xFF;
 }
 
-char
+unsigned char
 current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count)
 {
 	if (self->count + byte_count >= self->len) {
@@ -222,13 +234,31 @@ current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t
 		}
 	}
 
-	return self->content[self->count + byte_count];
+	return self->content[self->count + byte_count] & 0xFF;
+}
+
+uint8_t
+count_byte__JSONContentIterator(struct JSONContentIterator *self)
+{
+	unsigned char c1 = current_character__JSONContentIterator(self, 0);
+
+	if ((c1 & 0x80) == 0) {
+		return 1;
+	} else if ((c1 & 0xE0) == 0xC0) {
+		return 2;
+	} else if ((c1 & 0xF0) == 0xE0) {
+		return 3;
+	} else if ((c1 & 0xF8) == 0xF0) {
+		return 4;
+	} else {
+		FATAL("Invalid character: %d", c1);
+	}
 }
 
 uint32_t
-read_bytes__JSONContentIterator(struct JSONContentIterator *self, char (*get_character)(struct JSONContentIterator *self, uint8_t byte_count))
+read_bytes__JSONContentIterator(struct JSONContentIterator *self, unsigned char (*get_character)(struct JSONContentIterator *self, uint8_t byte_count))
 {
-	char c1 = get_character(self, 0);
+	unsigned char c1 = get_character(self, 0);
 	uint32_t res;
 
 	// See RFC 3629:
@@ -249,22 +279,22 @@ read_bytes__JSONContentIterator(struct JSONContentIterator *self, char (*get_cha
 	if ((c1 & 0x80) == 0) {
 		res = c1;
 	} else if ((c1 & 0xE0) == 0xC0) {
-		char c2 = get_character(self, 1);
+		unsigned char c2 = get_character(self, 1);
 
 		res = (c1 & 0x1F) << 6 | c2 & 0x3F;
 	} else if ((c1 & 0xF0) == 0xE0) {
-		char c2 = get_character(self, 1);
-		char c3 = get_character(self, 2);
+		unsigned char c2 = get_character(self, 1);
+		unsigned char c3 = get_character(self, 2);
 
 		res = (c1 & 0xF) << 12 | (c2 & 0x3F) << 6 | c3 & 0x3F;
 	} else if ((c1 & 0xF8) == 0xF0) {
-		char c2 = get_character(self, 1);
-		char c3 = get_character(self, 2);
-		char c4 = get_character(self, 3);
+		unsigned char c2 = get_character(self, 1);
+		unsigned char c3 = get_character(self, 2);
+		unsigned char c4 = get_character(self, 3);
 
 		res = (c1 & 0x7) << 18 | (c2 & 0x3F) << 12 | (c3 & 0x3F) << 6 | c4 & 0x3F;
 	} else {
-		FATAL("Invalid character: %c", c1);
+		FATAL("Invalid character: %d", c1);
 	}
 
 	if (res > 0x10FFFF) {
@@ -339,7 +369,7 @@ init__JSONValueString(void)
 bool
 eq__JSONValueString(const JSONValueString *self, const JSONValueString *other)
 {
-	if (self->len == 0 && other->len == 0) {
+	if (is_empty__JSONValueString(self) && is_empty__JSONValueString(other)) {
 		return true;
 	} else if (self->len != other->len) {
 		return false;
@@ -415,9 +445,94 @@ push__JSONValueString(JSONValueString *self, uint32_t c)
 }
 
 bool
-is_empty__JSONValueString(JSONValueString *self)
+push_characters__JSONValueString(JSONValueString *self, char *s, size_t s_len)
+{
+	size_t new_size = self->len + s_len + 1;
+
+	if (new_size >= self->capacity) {
+		self->capacity <<= (new_size / self->capacity + 1);
+		self->buffer = realloc(self->buffer, self->capacity);
+
+		assert(self->capacity > new_size);
+	}
+
+	if (!self->buffer) {
+		return false;
+	}
+
+	char *start_buffer = self->buffer + self->len;
+
+	memcpy(start_buffer, s, s_len);
+
+	self->len = new_size - 1;
+
+	self->buffer[self->len] = 0;
+
+	return true;
+}
+
+bool
+is_empty__JSONValueString(const JSONValueString *self)
 {
 	return self->len == 0;
+}
+
+void
+to_string__JSONValueString(const JSONValueString *self, JSONValueString *res)
+{
+	push__JSONValueString(res, '"');
+
+	for (size_t i = 0; i < self->len; ++i) {
+		char current = self->buffer[i];
+
+		switch (current) {
+			case '\"':
+				push__JSONValueString(res, '\\');
+				push__JSONValueString(res, '"');
+
+				break;
+			case '\\':
+				push__JSONValueString(res, '\\');
+				push__JSONValueString(res, '\\');
+
+				break;
+			case '/':
+				push__JSONValueString(res, '\\');
+				push__JSONValueString(res, '/');
+
+				break;
+			case '\b':
+				push__JSONValueString(res, '\\');
+				push__JSONValueString(res, 'b');
+
+				break;
+			case '\f':
+				push__JSONValueString(res, '\\');
+				push__JSONValueString(res, 'f');
+
+				break;
+			case '\n':
+				push__JSONValueString(res, '\\');
+				push__JSONValueString(res, 'n');
+
+				break;
+			case '\r':
+				push__JSONValueString(res, '\\');
+				push__JSONValueString(res, 'r');
+
+				break;
+			case '\t':
+				push__JSONValueString(res, '\\');
+				push__JSONValueString(res, 't');
+
+				break;
+			default:
+				// TODO: Translate non-ascii characters to \uXXXX
+				push__JSONValueString(res, current);
+		}
+	}
+
+	push__JSONValueString(res, '"');
 }
 
 void
@@ -550,7 +665,7 @@ deinit__JSONValueObject(const JSONValueObject *self)
 }
 
 JSONValue
-init_number__JSONValue(double number)
+init_number__JSONValue(JSONValueString number)
 {
 	return (JSONValue){
 		.kind = JSON_VALUE_KIND_NUMBER,
@@ -603,10 +718,90 @@ init_null__JSONValue()
 }
 
 void
+to_string_base__JSONValue(const JSONValue *self, JSONValueString *res)
+{
+	switch (self->kind) {
+		case JSON_VALUE_KIND_NUMBER:
+			push_characters__JSONValueString(res, self->number.buffer, self->number.len);
+
+			break;
+		case JSON_VALUE_KIND_STRING:
+			to_string__JSONValueString(&self->string, res);
+
+			break;
+		case JSON_VALUE_KIND_BOOLEAN:
+			if (self->boolean) {
+				push_characters__JSONValueString(res, "true", 4);
+			} else {
+				push_characters__JSONValueString(res, "false", 5);
+			}
+
+			break;
+		case JSON_VALUE_KIND_ARRAY: {
+			push__JSONValueString(res, '[');
+
+			size_t array_len = self->array.len;
+
+			for (size_t i = 0; i < self->array.len; ++i) {
+				to_string_base__JSONValue(&self->array.buffer[i], res);
+
+				if (i + 1 != array_len) {
+					push__JSONValueString(res, ',');
+				}
+			}
+
+			push__JSONValueString(res, ']');
+
+			break;
+		}
+		case JSON_VALUE_KIND_OBJECT: {
+			push__JSONValueString(res, '{');
+
+			size_t object_len = self->object.map.len;
+
+			for (size_t i = 0; i < object_len; ++i) {
+				const JSONValueObjectKeyValue *key_value = &self->object.map.buffer[i];
+
+				push_characters__JSONValueString(res, key_value->key.buffer, key_value->key.len);
+				push__JSONValueString(res, ':');
+				to_string_base__JSONValue(key_value->value, res);
+
+				if (i + 1 != object_len) {
+					push__JSONValueString(res, ',');
+				}
+			}
+
+			push__JSONValueString(res, '}');
+
+			break;
+		}
+		case JSON_VALUE_KIND_NULL:
+			push_characters__JSONValueString(res, "null", 4);
+
+			break;
+		default:
+			UNREACHABLE("Unknown value");
+	}
+}
+
+char *
+to_string__JSONValue(const JSONValue *self)
+{
+	JSONValueString res = init__JSONValueString();
+
+	to_string_base__JSONValue(self, &res);
+
+	return res.buffer;
+}
+
+void
 deinit__JSONValue(const JSONValue *self)
 {
 	switch (self->kind) {
 		case JSON_VALUE_KIND_NUMBER:
+			deinit__JSONValueString(&self->number);
+
+			break;
 		case JSON_VALUE_KIND_BOOLEAN:
 		case JSON_VALUE_KIND_NULL:
 			break;
@@ -726,7 +921,9 @@ parse_array_value__JSON(struct JSONContentIterator *iter)
 uint32_t 
 parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObject *object)
 {
-	if (!expect_character__JSONContentIterator(iter, '"', true)) {
+	skip_spaces__JSONContentIterator(iter);
+
+	if (current__JSONContentIterator(iter) != '"') {
 		return PARSE_OBJECT_EXPECTED_MEMBER;
 	}
 
@@ -869,7 +1066,7 @@ parse_string_escape_value__JSON(struct JSONContentIterator *iter, JSONValueStrin
 				is_hex_character__JSON(u3) &&
 				is_hex_character__JSON(u4)) {
 				char unicode_escape_value_s[] = {
-					'0', 'x', (char)u1, (char)u2, (char)u3, (char)u4, '\0'
+					'0', 'x', (char)u1, (char)u2, (char)u3, (char)u4, 0
 				};
 
 				character_to_add = strtol(&unicode_escape_value_s[0], NULL, 0);	
@@ -916,14 +1113,18 @@ parse_string_value__JSON(struct JSONContentIterator *iter)
     // unescaped = %x20-21 / %x23-5B / %x5D-10FFFF
 	//
 	// [...]
+	if (!expect_character__JSONContentIterator(iter, '"', true)) {
+		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected to have `\"`");
+	}
+
 	uint32_t res = PARSE_STRING_NO_ERROR;
-	uint32_t current;
+	uint32_t current = current__JSONContentIterator(iter);
 	JSONValueString string = init__JSONValueString();
 
-	while ((current = next__JSONContentIterator(iter)) && current != '"') {
+	while (current && current != '"') {
 		switch (current) {
 			case '\\':
-				if (parse_string_escape_value__JSON(iter, &string)) {
+				if ((res = parse_string_escape_value__JSON(iter, &string))) {
 					goto handle_err;
 				}
 
@@ -935,6 +1136,8 @@ parse_string_value__JSON(struct JSONContentIterator *iter)
 					return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_OUT_OF_MEMORY, "Out of memory");
 				}
 		}
+
+		current = next__JSONContentIterator(iter);
 	}
 
 	next__JSONContentIterator(iter); // Skip `"`
@@ -1092,7 +1295,7 @@ parse_number_value__JSON(struct JSONContentIterator *iter)
 		goto handle_err;
 	}
 
-	return init_ok__JSONValueResult(init_string__JSONValue(number));
+	return init_ok__JSONValueResult(init_number__JSONValue(number));
 
 handle_err:
 	switch (res) {

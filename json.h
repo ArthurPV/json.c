@@ -43,13 +43,16 @@ typedef struct JSONValueObject {
 typedef struct JSONValue {
 	enum JSONValueKind kind;
 	union {
-		double number;
+		JSONValueString number;
 		JSONValueString string;
 		bool boolean;
 		JSONValueArray array;
 		JSONValueObject object;
 	};
 } JSONValue;
+
+char *
+to_string__JSONValue(const JSONValue *self);
 
 enum JSONValueResultKind {
 	JSON_VALUE_RESULT_KIND_OK,
@@ -72,10 +75,10 @@ typedef struct JSONValueResult {
 	};
 } JSONValueResult;
 
-static inline bool
+bool
 is_err__JSONValueResult(const JSONValueResult *self);
 
-static inline const JSONValue *
+const JSONValue *
 unwrap__JSONValueResult(const JSONValueResult *self);
 
 void
