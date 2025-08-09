@@ -22,6 +22,7 @@ typedef struct JSONValueString {
 typedef struct JSONValueArray {
 	struct JSONValue *buffer;
 	size_t len;
+	size_t capacity;
 } JSONValueArray;
 
 typedef struct JSONValueObjectKeyValue {

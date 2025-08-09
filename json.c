@@ -61,7 +61,10 @@ static inline void
 deinit__JSONValueString(const JSONValueString *self);
 
 static inline JSONValueArray
-init__JSONValueArray(struct JSONValue *buffer, size_t len);
+init__JSONValueArray(void);
+
+static bool 
+push__JSONValueArray(JSONValueArray *self, JSONValue value);
 
 static void
 deinit__JSONValueArray(const JSONValueArray *self);
@@ -127,13 +130,17 @@ static void
 deinit__JSONValueResult(const JSONValueResult *self);
 
 static JSONValueResult
-parse_name__JSON(struct JSONContentIterator *iter);
-
-static JSONValueResult
-parse_key__JSON(struct JSONContentIterator *iter);
-
-static JSONValueResult
 parse_array_value__JSON(struct JSONContentIterator *iter);
+
+#define PARSE_OBJECT_NO_ERROR 0
+#define PARSE_OBJECT_EXPECTED_MEMBER 1
+#define PARSE_OBJECT_EXPECTED_VALUE_SEPARATOR 2
+#define PARSE_OBJECT_INVALID_MEMBER_NAME 3
+#define PARSE_OBJECT_INVALID_MEMBER_VALUE 4
+#define PARSE_OBJECT_OUT_OF_MEMORY 5
+
+static uint32_t 
+parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObject *object);
 
 static JSONValueResult
 parse_object_value__JSON(struct JSONContentIterator *iter);
@@ -186,9 +193,6 @@ parse_null_value__JSON(struct JSONContentIterator *iter);
 static JSONValueResult
 parse_value__JSON(struct JSONContentIterator *iter);
 
-static JSONValueResult
-parse_content__JSON(const char *content, size_t content_len);
-
 struct JSONContentIterator
 init__JSONContentIterator(const char *content, size_t len)
 {
@@ -210,7 +214,7 @@ next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t by
 		}
 	}
 
-	return self->content[++self->count];
+	return self->content[self->count++];
 }
 
 char
@@ -230,7 +234,7 @@ current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t
 uint32_t
 read_bytes__JSONContentIterator(struct JSONContentIterator *self, char (*get_character)(struct JSONContentIterator *self, uint8_t byte_count))
 {
-	char c1 = get_character(self, 1);
+	char c1 = get_character(self, 0);
 	uint32_t res;
 
 	// See RFC 3629:
@@ -251,18 +255,18 @@ read_bytes__JSONContentIterator(struct JSONContentIterator *self, char (*get_cha
 	if ((c1 & 0x80) == 0) {
 		res = c1;
 	} else if ((c1 & 0xE0) == 0xC0) {
-		char c2 = get_character(self, 2);
+		char c2 = get_character(self, 1);
 
 		res = (c1 & 0x1F) << 6 | c2 & 0x3F;
 	} else if ((c1 & 0xF0) == 0xE0) {
-		char c2 = get_character(self, 2);
-		char c3 = get_character(self, 3);
+		char c2 = get_character(self, 1);
+		char c3 = get_character(self, 2);
 
 		res = (c1 & 0xF) << 12 | (c2 & 0x3F) << 6 | c3 & 0x3F;
 	} else if ((c1 & 0xF8) == 0xF0) {
-		char c2 = get_character(self, 2);
-		char c3 = get_character(self, 3);
-		char c4 = get_character(self, 4);
+		char c2 = get_character(self, 1);
+		char c3 = get_character(self, 2);
+		char c4 = get_character(self, 3);
 
 		res = (c1 & 0x7) << 18 | (c2 & 0x3F) << 12 | (c3 & 0x3F) << 6 | c4 & 0x3F;
 	} else {
@@ -413,12 +417,32 @@ deinit__JSONValueString(const JSONValueString *self)
 }
 
 JSONValueArray
-init__JSONValueArray(struct JSONValue *buffer, size_t len)
+init__JSONValueArray(void)
 {
 	return (JSONValueArray){
-		.buffer = buffer,
-		.len = len
+		.buffer = NULL,
+		.len = 0,
+		.capacity = 8
 	};
+}
+
+bool
+push__JSONValueArray(JSONValueArray *self, JSONValue value)
+{
+	if (!self->buffer) {
+		self->buffer = malloc(self->capacity);
+	} else if (self->len + 1 >= self->capacity) {
+		self->capacity *= 2;
+		self->buffer = realloc(self->buffer, self->capacity);
+	}
+
+	if (!self->buffer) {
+		return false;
+	}
+
+	self->buffer[self->len++] = value;
+
+	return true;
 }
 
 void
@@ -644,54 +668,121 @@ deinit__JSONValueResult(const JSONValueResult *self)
 }
 
 JSONValueResult
-parse_name__JSON(struct JSONContentIterator *iter)
+parse_array_value__JSON(struct JSONContentIterator *iter)
 {
-	JSONValueString name = init__JSONValueString();
+	// See RFC 8259:
+	//
+	// 5.  Arrays
+	//
+	// [...]
+	//
+	// array = begin-array [ value *( value-separator value ) ] end-array
+	//
+	// [...]
 	uint32_t current = current__JSONContentIterator(iter);
+	JSONValueArray array = init__JSONValueArray();
 
-	while (current && current != '"') {
-		if (!push__JSONValueString(&name, current)) {
+	while (current && current != ']') {
+		JSONValueResult value_result = parse_value__JSON(iter);
+
+		if (is_err__JSONValueResult(&value_result)) {
+			return value_result;
+		}
+
+		const JSONValue *value = unwrap__JSONValueResult(&value_result);
+
+		if (!push__JSONValueArray(&array, *value)) {
 			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_OUT_OF_MEMORY, "Out of memory");
 		}
 
-		current = next__JSONContentIterator(iter);
+		if (!(current__JSONContentIterator(iter) == ']' || expect_character__JSONContentIterator(iter, ','))) {
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `,`");
+		}
+
+		current = current__JSONContentIterator(iter);
 	}
 
-	if (!expect_character__JSONContentIterator(iter, '"')) {
-		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `\"`");
-	}
-
-	return init_ok__JSONValueResult(init_string__JSONValue(name));
+	return init_ok__JSONValueResult(init_array__JSONValue(array));
 }
 
-JSONValueResult
-parse_key__JSON(struct JSONContentIterator *iter)
+uint32_t 
+parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObject *object)
 {
 	if (!expect_character__JSONContentIterator(iter, '"')) {
-		UNREACHABLE("expected \"");
+		return PARSE_OBJECT_EXPECTED_MEMBER;
 	}
 
-	JSONValueResult name_result = parse_name__JSON(iter);
+	JSONValueResult name_result = parse_string_value__JSON(iter);
 
 	if (is_err__JSONValueResult(&name_result)) {
-		return name_result;
+		return PARSE_OBJECT_INVALID_MEMBER_NAME;
+	} else if (!expect_character__JSONContentIterator(iter, ':')) {
+		return PARSE_OBJECT_EXPECTED_VALUE_SEPARATOR;
 	}
 
-	if (!expect_character__JSONContentIterator(iter, ':')) {
-		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `:`");
+	JSONValueResult value_result = parse_value__JSON(iter);
+
+	if (is_err__JSONValueResult(&value_result)) {
+		return PARSE_OBJECT_INVALID_MEMBER_VALUE;
+	}
+	
+	const JSONValue *name = unwrap__JSONValueResult(&name_result);
+	const JSONValue *value = unwrap__JSONValueResult(&value_result);
+
+	if (!add_member__JSONValueObject(object, name->string, *value)) {
+		return PARSE_OBJECT_OUT_OF_MEMORY;
 	}
 
-	return name_result;
-}
-
-JSONValueResult
-parse_array_value__JSON(struct JSONContentIterator *iter)
-{
+	return PARSE_OBJECT_NO_ERROR;
 }
 
 JSONValueResult
 parse_object_value__JSON(struct JSONContentIterator *iter)
 {
+	// See RFC 8259:
+	//
+	// 4.  Objects
+	//
+	// [...]
+	//
+	// object = begin-object [ member *( value-separator member ) ]
+    //          end-object
+	// member = string name-separator value
+	//
+	// [...]
+	if (!expect_character__JSONContentIterator(iter, '{')) {
+		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected to have `{`");
+	}
+
+	uint32_t current = current__JSONContentIterator(iter);
+	JSONValueObject object = init__JSONValueObject();
+	uint32_t res;
+
+	while (current && current != '}') {
+		if ((res = parse_object_member_value__JSON(iter, &object))) {
+			goto handle_err;
+		}
+
+		current = current__JSONContentIterator(iter);
+	}
+
+	return init_ok__JSONValueResult(init_object__JSONValue(object));
+
+handle_err:
+	switch (res) {
+		case PARSE_OBJECT_EXPECTED_MEMBER:
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected member");
+		case PARSE_OBJECT_EXPECTED_VALUE_SEPARATOR:
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected value separator");
+		case PARSE_OBJECT_INVALID_MEMBER_NAME:
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Invalid member name");
+		case PARSE_OBJECT_INVALID_MEMBER_VALUE:
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Invalid member value");
+		case PARSE_OBJECT_OUT_OF_MEMORY:
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_OUT_OF_MEMORY, "Out of memory");
+		default:
+			UNREACHABLE("Unknown error");
+	}
 }
 
 bool
@@ -1053,75 +1144,13 @@ parse_value__JSON(struct JSONContentIterator *iter)
 }
 
 JSONValueResult
-parse_content__JSON(const char *content, size_t content_len)
-{
-	struct JSONContentIterator iter = init__JSONContentIterator(content, content_len);
-
-	next__JSONContentIterator(&iter); // Skip `{`
-
-	uint32_t current = 0;
-	JSONValueObject object = init__JSONValueObject();
-	bool has_new_object = false;
-	
-	while ((current = next__JSONContentIterator(&iter)) && current != '}') {
-		switch (current) {
-			case '\"': {
-				JSONValueResult key_result = parse_key__JSON(&iter);
-
-				if (is_err__JSONValueResult(&key_result)) {
-					return key_result;
-				}
-
-				JSONValueResult value_result = parse_value__JSON(&iter);
-
-				if (is_err__JSONValueResult(&value_result)) {
-					return value_result;
-				}
-
-				const JSONValue *key = unwrap__JSONValueResult(&key_result);
-				const JSONValue *value = unwrap__JSONValueResult(&value_result);
-
-				if (!add_member__JSONValueObject(&object, key->string, *value)) {
-					return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_OUT_OF_MEMORY, "Out of memory");
-				}
-
-				has_new_object = true;
-
-				break;
-			}
-			default:
-				if (isspace(current)) {
-					continue;
-				} else if (has_new_object && !expect_character__JSONContentIterator(&iter, ',')) {
-					return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `,`");
-				}
-
-				return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Invalid character");
-		}
-	}
-
-	if (!expect_character__JSONContentIterator(&iter, '}')) {
-		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `}`");
-	}
-
-	return init_ok__JSONValueResult(init_object__JSONValue(object));
-}
-
-JSONValueResult
 parse__JSON(const char *content, size_t content_len)
 {
 	if (!content) {
 		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "No content");
 	}
 
-	char *begin = strchr(content, '{');
+	struct JSONContentIterator iter = init__JSONContentIterator(content, content_len);
 
-	if (!begin) {
-		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `{`");
-	}
-
-	content_len -= begin - content;
-	content = begin;
-
-	return parse_content__JSON(content, content_len);
+	return parse_object_value__JSON(&iter);
 }
