@@ -710,6 +710,8 @@ parse_array_value__JSON(struct JSONContentIterator *iter)
 			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_OUT_OF_MEMORY, "Out of memory");
 		}
 
+		skip_spaces__JSONContentIterator(iter);
+
 		if (!(current__JSONContentIterator(iter) == ']' || expect_character__JSONContentIterator(iter, ','))) {
 			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `,`");
 		}
@@ -778,6 +780,12 @@ parse_object_value__JSON(struct JSONContentIterator *iter)
 	while (current && current != '}') {
 		if ((res = parse_object_member_value__JSON(iter, &object))) {
 			goto handle_err;
+		}
+
+		skip_spaces__JSONContentIterator(iter);
+
+		if (!(current__JSONContentIterator(iter) == '}' || expect_character__JSONContentIterator(iter, ','))) {
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `,`");
 		}
 
 		current = current__JSONContentIterator(iter);
