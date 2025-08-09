@@ -43,7 +43,7 @@ static uint32_t
 skip_spaces__JSONContentIterator(struct JSONContentIterator *self);
 
 static bool
-expect_character__JSONContentIterator(struct JSONContentIterator *self, char expected);
+expect_character__JSONContentIterator(struct JSONContentIterator *self, char expected, bool allow_skip_spaces);
 
 static bool
 expect_characters__JSONContentIterator(struct JSONContentIterator *self, char *expected, size_t expected_len);
@@ -299,8 +299,12 @@ skip_spaces__JSONContentIterator(struct JSONContentIterator *self)
 }
 
 bool
-expect_character__JSONContentIterator(struct JSONContentIterator *self, char expected)
+expect_character__JSONContentIterator(struct JSONContentIterator *self, char expected, bool allow_skip_spaces)
 {
+	if (allow_skip_spaces) {
+		skip_spaces__JSONContentIterator(self);
+	}
+
 	if (current__JSONContentIterator(self) == expected) {
 		next__JSONContentIterator(self);
 
@@ -685,7 +689,7 @@ parse_array_value__JSON(struct JSONContentIterator *iter)
 	// array = begin-array [ value *( value-separator value ) ] end-array
 	//
 	// [...]
-	if (!expect_character__JSONContentIterator(iter, '[')) {
+	if (!expect_character__JSONContentIterator(iter, '[',  true)) {
 		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected to have `[`");
 	}
 
@@ -707,7 +711,7 @@ parse_array_value__JSON(struct JSONContentIterator *iter)
 
 		skip_spaces__JSONContentIterator(iter);
 
-		if (!(current__JSONContentIterator(iter) == ']' || expect_character__JSONContentIterator(iter, ','))) {
+		if (!(current__JSONContentIterator(iter) == ']' || expect_character__JSONContentIterator(iter, ',', true))) {
 			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `,`");
 		}
 
@@ -722,9 +726,7 @@ parse_array_value__JSON(struct JSONContentIterator *iter)
 uint32_t 
 parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObject *object)
 {
-	skip_spaces__JSONContentIterator(iter);
-
-	if (!expect_character__JSONContentIterator(iter, '"')) {
+	if (!expect_character__JSONContentIterator(iter, '"', true)) {
 		return PARSE_OBJECT_EXPECTED_MEMBER;
 	}
 
@@ -734,9 +736,7 @@ parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObjec
 		return PARSE_OBJECT_INVALID_MEMBER_NAME;
 	}
 
-	skip_spaces__JSONContentIterator(iter);
-
-	if (!expect_character__JSONContentIterator(iter, ':')) {
+	if (!expect_character__JSONContentIterator(iter, ':', true)) {
 		return PARSE_OBJECT_EXPECTED_VALUE_SEPARATOR;
 	}
 
@@ -770,7 +770,7 @@ parse_object_value__JSON(struct JSONContentIterator *iter)
 	// member = string name-separator value
 	//
 	// [...]
-	if (!expect_character__JSONContentIterator(iter, '{')) {
+	if (!expect_character__JSONContentIterator(iter, '{', true)) {
 		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected to have `{`");
 	}
 
@@ -785,7 +785,7 @@ parse_object_value__JSON(struct JSONContentIterator *iter)
 
 		skip_spaces__JSONContentIterator(iter);
 
-		if (!(current__JSONContentIterator(iter) == '}' || expect_character__JSONContentIterator(iter, ','))) {
+		if (!(current__JSONContentIterator(iter) == '}' || expect_character__JSONContentIterator(iter, ',', true))) {
 			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected `,`");
 		}
 
