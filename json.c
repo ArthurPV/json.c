@@ -685,6 +685,10 @@ parse_array_value__JSON(struct JSONContentIterator *iter)
 	// array = begin-array [ value *( value-separator value ) ] end-array
 	//
 	// [...]
+	if (!expect_character__JSONContentIterator(iter, '[')) {
+		return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Expected to have `[`");
+	}
+
 	uint32_t current = current__JSONContentIterator(iter);
 	JSONValueArray array = init__JSONValueArray();
 
