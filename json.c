@@ -266,14 +266,14 @@ read_bytes__JSONContentIterator(struct JSONContentIterator *self, unsigned char 
 	// 3.  UTF-8 definition
 	//
 	// [...]
-    // 
-    // Char. number range  |        UTF-8 octet sequence
-    //    (hexadecimal)    |              (binary)
-    // --------------------+---------------------------------------------
-    // 0000 0000-0000 007F | 0xxxxxxx
-    // 0000 0080-0000 07FF | 110xxxxx 10xxxxxx
-    // 0000 0800-0000 FFFF | 1110xxxx 10xxxxxx 10xxxxxx
-    // 0001 0000-0010 FFFF | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+	//
+	// Char. number range  |        UTF-8 octet sequence
+	//    (hexadecimal)    |              (binary)
+	// --------------------+---------------------------------------------
+	// 0000 0000-0000 007F | 0xxxxxxx
+	// 0000 0080-0000 07FF | 110xxxxx 10xxxxxx
+	// 0000 0800-0000 FFFF | 1110xxxx 10xxxxxx 10xxxxxx
+	// 0001 0000-0010 FFFF | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
 	//
 	// [...]
 	if ((c1 & 0x80) == 0) {
@@ -387,6 +387,21 @@ eq__JSONValueString(const JSONValueString *self, const JSONValueString *other)
 bool
 push__JSONValueString(JSONValueString *self, uint32_t c)
 {
+	// See RFC 3629:
+	//
+	// 3.  UTF-8 definition
+	//
+	// [...]
+	//
+	// Char. number range  |        UTF-8 octet sequence
+	//    (hexadecimal)    |              (binary)
+	// --------------------+---------------------------------------------
+	// 0000 0000-0000 007F | 0xxxxxxx
+	// 0000 0080-0000 07FF | 110xxxxx 10xxxxxx
+	// 0000 0800-0000 FFFF | 1110xxxx 10xxxxxx 10xxxxxx
+	// 0001 0000-0010 FFFF | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+	//
+	// [...]
 	uint8_t byte_count;
 
 	if (c <= 0x7F) {
