@@ -39,6 +39,9 @@ next__JSONContentIterator(struct JSONContentIterator *self);
 static inline uint32_t 
 current__JSONContentIterator(struct JSONContentIterator *self);
 
+static uint32_t
+skip_spaces__JSONContentIterator(struct JSONContentIterator *self);
+
 static bool
 expect_character__JSONContentIterator(struct JSONContentIterator *self, char expected);
 
@@ -214,7 +217,7 @@ next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t by
 		}
 	}
 
-	return self->content[self->count++];
+	return self->content[++self->count];
 }
 
 char
@@ -290,6 +293,18 @@ uint32_t
 current__JSONContentIterator(struct JSONContentIterator *self)
 {
 	return read_bytes__JSONContentIterator(self, &current_character__JSONContentIterator);
+}
+
+uint32_t
+skip_spaces__JSONContentIterator(struct JSONContentIterator *self)
+{
+	uint32_t current = current__JSONContentIterator(self);
+
+	while (current && isspace(current)) {
+		current = next__JSONContentIterator(self);
+	}
+
+	return current;
 }
 
 bool
@@ -647,7 +662,7 @@ is_err__JSONValueResult(const JSONValueResult *self)
 const JSONValue *
 unwrap__JSONValueResult(const JSONValueResult *self)
 {
-	assert(self->kind == JSON_VALUE_RESULT_KIND_ERR && "expected ok");
+	assert(self->kind == JSON_VALUE_RESULT_KIND_OK && "expected ok");
 
 	return &self->ok;
 }
@@ -708,6 +723,8 @@ parse_array_value__JSON(struct JSONContentIterator *iter)
 uint32_t 
 parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObject *object)
 {
+	skip_spaces__JSONContentIterator(iter);
+
 	if (!expect_character__JSONContentIterator(iter, '"')) {
 		return PARSE_OBJECT_EXPECTED_MEMBER;
 	}
@@ -908,6 +925,8 @@ parse_string_value__JSON(struct JSONContentIterator *iter)
 				}
 		}
 	}
+
+	next__JSONContentIterator(iter); // Skip `"`
 
 	return init_ok__JSONValueResult(init_string__JSONValue(string));
 
@@ -1114,6 +1133,8 @@ parse_null_value__JSON(struct JSONContentIterator *iter)
 JSONValueResult
 parse_value__JSON(struct JSONContentIterator *iter)
 {
+	skip_spaces__JSONContentIterator(iter);
+
 	switch (current__JSONContentIterator(iter)) {
 		case '[':
 			return parse_array_value__JSON(iter);
