@@ -436,10 +436,10 @@ bool
 push__JSONValueArray(JSONValueArray *self, JSONValue value)
 {
 	if (!self->buffer) {
-		self->buffer = malloc(self->capacity);
-	} else if (self->len + 1 >= self->capacity) {
+		self->buffer = malloc(sizeof(JSONValue) * self->capacity);
+	} else if (self->len >= self->capacity) {
 		self->capacity *= 2;
-		self->buffer = realloc(self->buffer, self->capacity);
+		self->buffer = realloc(self->buffer, sizeof(JSONValue) * self->capacity);
 	}
 
 	if (!self->buffer) {
@@ -714,6 +714,8 @@ parse_array_value__JSON(struct JSONContentIterator *iter)
 		current = current__JSONContentIterator(iter);
 	}
 
+	next__JSONContentIterator(iter); // Skip `]`
+
 	return init_ok__JSONValueResult(init_array__JSONValue(array));
 }
 
@@ -730,7 +732,11 @@ parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObjec
 
 	if (is_err__JSONValueResult(&name_result)) {
 		return PARSE_OBJECT_INVALID_MEMBER_NAME;
-	} else if (!expect_character__JSONContentIterator(iter, ':')) {
+	}
+
+	skip_spaces__JSONContentIterator(iter);
+
+	if (!expect_character__JSONContentIterator(iter, ':')) {
 		return PARSE_OBJECT_EXPECTED_VALUE_SEPARATOR;
 	}
 
@@ -785,6 +791,8 @@ parse_object_value__JSON(struct JSONContentIterator *iter)
 
 		current = current__JSONContentIterator(iter);
 	}
+
+	next__JSONContentIterator(iter); // Skip `}`
 
 	return init_ok__JSONValueResult(init_object__JSONValue(object));
 
