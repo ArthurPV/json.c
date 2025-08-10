@@ -1,5 +1,5 @@
-#ifndef JSON_PARSER_H
-#define JSON_PARSER_H
+#ifndef JSON_H
+#define JSON_H
 
 #include <stddef.h>
 #include <stdbool.h>
@@ -87,4 +87,4 @@ deinit__JSONValueResult(const JSONValueResult *self);
 JSONValueResult
 parse__JSON(const char *content, size_t content_len);
 
-#endif // JSON_PARSER_H
+#endif // JSON_H
