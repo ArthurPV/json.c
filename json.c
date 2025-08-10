@@ -106,6 +106,8 @@ init__JSONValueObjectBucket(JSONValueObjectKeyValue pair);
 static inline void
 deinit__JSONValueObjectBucket(const JSONValueObjectBucket *self);
 
+#define JSON_VALUE_OBJECT_KEY_VALUE_MAP_LOAD_FACTOR 0.75
+
 static inline JSONValueObjectKeyValueMap
 init__JSONValueObjectKeyValueMap(void);
 
@@ -809,7 +811,7 @@ push__JSONValueObjectKeyValueMap(JSONValueObjectKeyValueMap *self, JSONValueObje
 		if (!self->buckets) {
 			return OBJECT_KEY_VALUE_MAP_OUT_OF_MEMORY;
 		}
-	} else if (self->len + 1 >= self->capacity) {
+	} else if (self->len + 1 >= self->capacity * JSON_VALUE_OBJECT_KEY_VALUE_MAP_LOAD_FACTOR) {
 		size_t old_capacity = self->capacity;
 
 		self->capacity *= 2;
