@@ -25,13 +25,10 @@ static inline struct JSONContentIterator
 init__JSONContentIterator(const char *content, size_t len);
 
 static unsigned char
-next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count);
-
-static unsigned char
 current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count);
 
 static uint8_t
-get_codepoint_len_from_first_byte__JSONContentIterator(struct JSONContentIterator *self);
+get_codepoint_len_from_first_byte__JSONContentIterator(struct JSONContentIterator *self, unsigned char *c1p);
 
 static uint32_t
 read_bytes__JSONContentIterator(struct JSONContentIterator *self);
@@ -213,20 +210,6 @@ init__JSONContentIterator(const char *content, size_t len)
 }
 
 unsigned char
-next_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count)
-{
-	if (self->count >= self->len) {
-		if (byte_count == 0) {
-			return '\0';
-		} else {
-			FATAL("Malformed character");
-		}
-	}
-
-	return self->content[++self->count] & 0xFF;
-}
-
-unsigned char
 current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count)
 {
 	if (self->count + byte_count >= self->len) {
@@ -241,7 +224,7 @@ current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t
 }
 
 uint8_t
-get_codepoint_len_from_first_byte__JSONContentIterator(struct JSONContentIterator *self)
+get_codepoint_len_from_first_byte__JSONContentIterator(struct JSONContentIterator *self, unsigned char *c1p)
 {
 	// See RFC 3629:
 	//
@@ -259,6 +242,10 @@ get_codepoint_len_from_first_byte__JSONContentIterator(struct JSONContentIterato
 	//
 	// [...]
 	unsigned char c1 = current_character__JSONContentIterator(self, 0);
+
+	if (c1p) {
+		*c1p = c1;
+	}
 
 	if ((c1 & 0x80) == 0) {
 		return 1;
@@ -276,7 +263,8 @@ get_codepoint_len_from_first_byte__JSONContentIterator(struct JSONContentIterato
 uint32_t
 read_bytes__JSONContentIterator(struct JSONContentIterator *self)
 {
-	unsigned char c1 = current_character__JSONContentIterator(self, 0);
+	unsigned char c1; 
+	uint8_t codepoint_len = get_codepoint_len_from_first_byte__JSONContentIterator(self, &c1);
 	uint32_t res;
 
 	// See RFC 3629:
@@ -294,25 +282,37 @@ read_bytes__JSONContentIterator(struct JSONContentIterator *self)
 	// 0001 0000-0010 FFFF | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
 	//
 	// [...]
-	if ((c1 & 0x80) == 0) {
-		res = c1;
-	} else if ((c1 & 0xE0) == 0xC0) {
-		unsigned char c2 = current_character__JSONContentIterator(self, 1);
+	switch (codepoint_len) {
+		case 1:
+			res = c1;
 
-		res = (c1 & 0x1F) << 6 | c2 & 0x3F;
-	} else if ((c1 & 0xF0) == 0xE0) {
-		unsigned char c2 = current_character__JSONContentIterator(self, 1);
-		unsigned char c3 = current_character__JSONContentIterator(self, 2);
+			break;
+		case 2: {
+			unsigned char c2 = current_character__JSONContentIterator(self, 1);
 
-		res = (c1 & 0xF) << 12 | (c2 & 0x3F) << 6 | c3 & 0x3F;
-	} else if ((c1 & 0xF8) == 0xF0) {
-		unsigned char c2 = current_character__JSONContentIterator(self, 1);
-		unsigned char c3 = current_character__JSONContentIterator(self, 2);
-		unsigned char c4 = current_character__JSONContentIterator(self, 3);
+			res = (c1 & 0x1F) << 6 | c2 & 0x3F;
 
-		res = (c1 & 0x7) << 18 | (c2 & 0x3F) << 12 | (c3 & 0x3F) << 6 | c4 & 0x3F;
-	} else {
-		FATAL("Invalid character: %d", c1);
+			break;
+		}
+		case 3: {
+			unsigned char c2 = current_character__JSONContentIterator(self, 1);
+			unsigned char c3 = current_character__JSONContentIterator(self, 2);
+
+			res = (c1 & 0xF) << 12 | (c2 & 0x3F) << 6 | c3 & 0x3F;
+
+			break;
+		}
+		case 4: {
+			unsigned char c2 = current_character__JSONContentIterator(self, 1);
+			unsigned char c3 = current_character__JSONContentIterator(self, 2);
+			unsigned char c4 = current_character__JSONContentIterator(self, 3);
+
+			res = (c1 & 0x7) << 18 | (c2 & 0x3F) << 12 | (c3 & 0x3F) << 6 | c4 & 0x3F;
+
+			break;
+		}
+		default:
+			UNREACHABLE("This situation is impossible");
 	}
 
 	if (res > 0x10FFFF) {
@@ -325,7 +325,7 @@ read_bytes__JSONContentIterator(struct JSONContentIterator *self)
 uint32_t
 next__JSONContentIterator(struct JSONContentIterator *self)
 {
-	self->count += get_codepoint_len_from_first_byte__JSONContentIterator(self);
+	self->count += get_codepoint_len_from_first_byte__JSONContentIterator(self, NULL);
 
 	return read_bytes__JSONContentIterator(self);
 }
