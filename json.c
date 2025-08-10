@@ -48,6 +48,22 @@ expect_character__JSONContentIterator(struct JSONContentIterator *self, char exp
 static bool
 expect_characters__JSONContentIterator(struct JSONContentIterator *self, char *expected, size_t expected_len);
 
+struct SipHashState {
+	size_t v0;
+	size_t v1;
+	size_t v2;
+	size_t v3;
+};
+
+static void
+mix__SipHashState(struct SipHashState *self);
+
+static void
+final__SipHashState(struct SipHashState *self, size_t len);
+
+static size_t
+hash__SipHashState(const void *key, size_t key_len, size_t k0, size_t k1);
+
 static inline JSONValueString
 init__JSONValueString(void);
 
@@ -84,10 +100,26 @@ init__JSONValueObjectKeyValue(JSONValueString key, JSONValue value);
 static void
 deinit__JSONValueObjectKeyValue(const JSONValueObjectKeyValue *self);
 
+static inline JSONValueObjectBucket
+init__JSONValueObjectBucket(JSONValueObjectKeyValue pair);
+
+static inline void
+deinit__JSONValueObjectBucket(const JSONValueObjectBucket *self);
+
 static inline JSONValueObjectKeyValueMap
 init__JSONValueObjectKeyValueMap(void);
 
-static bool
+static inline size_t
+index__JSONValueObjectKeyValueMap(JSONValueObjectKeyValueMap *self, const JSONValueString *key);
+
+#define OBJECT_KEY_VALUE_MAP_NO_ERROR 0
+#define OBJECT_KEY_VALUE_MAP_OUT_OF_MEMORY 1
+#define OBJECT_KEY_VALUE_MAP_DUPLICATE_KEY 2
+
+static uint32_t
+push_bucket__JSONValueObjectKeyValueMap(JSONValueObjectKeyValueMap *self, size_t index, JSONValueObjectBucket *new_bucket);
+
+static uint32_t
 push__JSONValueObjectKeyValueMap(JSONValueObjectKeyValueMap *self, JSONValueObjectKeyValue value);
 
 static void
@@ -96,7 +128,7 @@ deinit__JSONValueObjectKeyValueMap(const JSONValueObjectKeyValueMap *self);
 static inline JSONValueObject
 init__JSONValueObject(void);
 
-static inline bool
+static inline uint32_t
 add_member__JSONValueObject(JSONValueObject *self, JSONValueString key, JSONValue value);
 
 static inline void
@@ -159,6 +191,7 @@ parse_array_value__JSON(struct JSONContentIterator *iter);
 #define PARSE_OBJECT_INVALID_MEMBER_NAME 3
 #define PARSE_OBJECT_INVALID_MEMBER_VALUE 4
 #define PARSE_OBJECT_OUT_OF_MEMORY 5
+#define PARSE_OBJECT_DUPLICATE_KEY 6
 
 static uint32_t 
 parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObject *object);
@@ -391,6 +424,89 @@ expect_characters__JSONContentIterator(struct JSONContentIterator *self, char *e
 	return true;
 }
 
+static void
+mix__SipHashState(struct SipHashState *self)
+{
+#define JSON_HASH_ROTATE_LEFT(value, bits) \
+	(((value) << (bits)) | ((value) >> (64 - (bits))))
+
+	self->v0 += self->v1;
+	self->v2 += self->v3;
+	self->v1 = JSON_HASH_ROTATE_LEFT(self->v1, 13);
+	self->v3 = JSON_HASH_ROTATE_LEFT(self->v3, 16);
+	self->v1 ^= self->v0;
+	self->v3 ^= self->v2;
+	self->v0 = JSON_HASH_ROTATE_LEFT(self->v0, 32);
+	self->v2 += self->v1;
+	self->v0 += self->v3;
+	self->v1 = JSON_HASH_ROTATE_LEFT(self->v1, 17);
+	self->v3 = JSON_HASH_ROTATE_LEFT(self->v3, 21);
+	self->v1 ^= self->v2;
+	self->v3 ^= self->v0;
+	self->v2 = JSON_HASH_ROTATE_LEFT(self->v2, 32);
+
+#undef JSON_HASH_ROTATE_LEFT
+}
+
+void
+final__SipHashState(struct SipHashState *self, size_t len)
+{
+	self->v2 ^= 0xFF;
+
+	for (int i = 0; i < 4; ++i) {
+		mix__SipHashState(self);
+	}
+
+	self->v0 ^= len;
+
+	for (int i = 0; i < 4; ++i) {
+		mix__SipHashState(self);
+	}
+}
+
+size_t
+hash__SipHashState(const void *key, size_t key_len, const size_t k0, const size_t k1)
+{
+	struct SipHashState state = {
+		.v0 = k0 ^ (sizeof(size_t) == 8 ? 0x736f6d6570736575ULL : 0x736f6d65),
+		.v1 = k1 ^ (sizeof(size_t) == 8 ? 0x646f72616e646f6dULL : 0x646f7261),
+		.v2 = k0 ^ (sizeof(size_t) == 8 ? 0x6c7967656e657261ULL : 0x6e657261),
+		.v3 = k1 ^ (sizeof(size_t) == 8 ? 0x7465646279746573ULL : 0x79746573)
+	};
+
+	const uint8_t *key_bytes = (const uint8_t*)key;
+	const uint8_t *end = key_bytes + key_len - (key_len % sizeof(uint64_t));
+	const uint64_t *blocks = (const uint64_t *)key_bytes;
+
+	while (key_bytes < end) {
+		state.v3 ^= *blocks;
+
+		for (int i = 0; i < 2; ++i) {
+			mix__SipHashState(&state);
+		}
+
+		state.v0 ^= *blocks;
+		++blocks;
+		key_bytes += sizeof(uint64_t);
+	}
+
+	uint64_t last_block = 0;
+
+	memcpy(&last_block, key_bytes, key_len % sizeof(uint64_t));
+
+	state.v3 ^= last_block;
+
+	for (int i = 0; i < 2; ++i) {
+		mix__SipHashState(&state);
+	}
+
+	state.v0 ^= last_block;
+
+	final__SipHashState(&state, key_len);
+
+	return state.v0 ^ state.v1 ^ state.v2 ^ state.v3;
+}
+
 JSONValueString
 init__JSONValueString(void)
 {
@@ -568,7 +684,7 @@ push__JSONValueArray(JSONValueArray *self, JSONValue value)
 {
 	if (!self->buffer) {
 		self->buffer = malloc(sizeof(JSONValue) * self->capacity);
-	} else if (self->len >= self->capacity) {
+	} else if (self->len + 1 >= self->capacity) {
 		self->capacity *= 2;
 		self->buffer = realloc(self->buffer, sizeof(JSONValue) * self->capacity);
 	}
@@ -617,43 +733,152 @@ deinit__JSONValueObjectKeyValue(const JSONValueObjectKeyValue *self)
 	free(self->value);
 }
 
+JSONValueObjectBucket
+init__JSONValueObjectBucket(JSONValueObjectKeyValue pair)
+{
+	return (JSONValueObjectBucket){
+		.pair = pair,
+		.next = NULL
+	};
+}
+
+void
+deinit__JSONValueObjectBucket(const JSONValueObjectBucket *self)
+{
+	deinit__JSONValueObjectKeyValue(&self->pair);
+}
+
 JSONValueObjectKeyValueMap
 init__JSONValueObjectKeyValueMap(void)
 {
 	return (JSONValueObjectKeyValueMap){
-		.buffer = NULL,
+		.buckets = NULL,
 		.len = 0,
 		.capacity = 8
 	};
 }
 
-bool
+size_t
+index__JSONValueObjectKeyValueMap(JSONValueObjectKeyValueMap *self, const JSONValueString *key)
+{
+	const size_t k0 = sizeof(size_t) == 8 ? 0x0123456789abcdefULL : 0x01234567;
+	const size_t k1 = sizeof(size_t) == 8 ? 0xfedcba9876543210ULL : 0x89abcdef;
+
+	return hash__SipHashState(key->buffer, key->len, k0, k1) % self->capacity;
+}
+
+uint32_t
+push_bucket__JSONValueObjectKeyValueMap(JSONValueObjectKeyValueMap *self, size_t index, JSONValueObjectBucket *new_bucket)
+{
+	JSONValueObjectBucket *head = self->buckets[index];
+
+	if (head) {
+		JSONValueObjectBucket *previous_bucket = NULL;
+		JSONValueObjectBucket *current_bucket = head;
+		bool is_exist = false;
+
+		while (current_bucket) {
+			if (eq__JSONValueString(&current_bucket->pair.key, &new_bucket->pair.key)) {
+				is_exist = true;
+			}
+
+			previous_bucket = current_bucket;
+			current_bucket = current_bucket->next;
+		}
+
+		if (is_exist) {
+			return OBJECT_KEY_VALUE_MAP_DUPLICATE_KEY;
+		}
+
+		previous_bucket->next = new_bucket;
+	} else {
+		self->buckets[index] = new_bucket;
+	}
+
+	return OBJECT_KEY_VALUE_MAP_NO_ERROR;
+}
+
+uint32_t
 push__JSONValueObjectKeyValueMap(JSONValueObjectKeyValueMap *self, JSONValueObjectKeyValue value)
 {
-	if (!self->buffer) {
-		self->buffer = malloc(sizeof(JSONValueObjectKeyValue) * self->capacity);
-	} else if (self->len == self->capacity) {
+	size_t index = index__JSONValueObjectKeyValueMap(self, &value.key);
+
+	if (!self->buckets) {
+		self->buckets = calloc(self->capacity, sizeof(void*));
+		
+		if (!self->buckets) {
+			return OBJECT_KEY_VALUE_MAP_OUT_OF_MEMORY;
+		}
+	} else if (self->len + 1 >= self->capacity) {
+		size_t old_capacity = self->capacity;
+
 		self->capacity *= 2;
-		self->buffer = realloc(self->buffer, sizeof(JSONValueObjectKeyValue) * self->capacity);
+
+		JSONValueObjectBucket **new_buckets = calloc(self->capacity, sizeof(void*));
+
+		if (!new_buckets) {
+			return OBJECT_KEY_VALUE_MAP_OUT_OF_MEMORY;
+		}
+
+		JSONValueObjectBucket **old_buckets = self->buckets;
+
+		self->buckets = new_buckets;
+
+		for (size_t i = 0; i < old_capacity; ++i) {
+			JSONValueObjectBucket *current = old_buckets[i];
+
+			while (current) {
+				JSONValueObjectBucket *next = current->next;
+				size_t new_index = index__JSONValueObjectKeyValueMap(self, &current->pair.key);
+
+				current->next = new_buckets[new_index];
+				new_buckets[new_index] = current;
+				current = next;
+			}
+		}
+
+		free(old_buckets);
+
+		// Reload index
+		index = index__JSONValueObjectKeyValueMap(self, &value.key);
 	}
 
-	if (!self->buffer) {
-		return false;
+	JSONValueObjectBucket *bucket_ptr = malloc(sizeof(JSONValueObjectBucket));
+
+	if (!bucket_ptr) {
+		return OBJECT_KEY_VALUE_MAP_OUT_OF_MEMORY;
 	}
 
-	self->buffer[self->len++] = value;
+	*bucket_ptr = init__JSONValueObjectBucket(value);
 
-	return true;
+	uint32_t res = push_bucket__JSONValueObjectKeyValueMap(self, index, bucket_ptr);
+
+	if (res == OBJECT_KEY_VALUE_MAP_NO_ERROR) {
+		++self->len;
+	}
+
+	return res;
 }
 
 void
 deinit__JSONValueObjectKeyValueMap(const JSONValueObjectKeyValueMap *self)
 {
-	for (size_t i = 0; i < self->len; ++i) {
-		deinit__JSONValueObjectKeyValue(&self->buffer[i]);
-	}
+	if (self->buckets) {
+		for (size_t i = 0; i < self->capacity; ++i) {
+			JSONValueObjectBucket *current_bucket = self->buckets[i];
 
-	free(self->buffer);
+			while (current_bucket) {
+				JSONValueObjectBucket *next_bucket = current_bucket->next;
+
+				deinit__JSONValueObjectBucket(current_bucket);
+				free(current_bucket);
+
+				current_bucket = next_bucket;
+			}
+		}
+
+		free(self->buckets);
+	}
 }
 
 JSONValueObject
@@ -664,7 +889,7 @@ init__JSONValueObject(void)
 	};
 }
 
-bool
+uint32_t
 add_member__JSONValueObject(JSONValueObject *self, JSONValueString key, JSONValue value)
 {
 	return push__JSONValueObjectKeyValueMap(&self->map, init__JSONValueObjectKeyValue(key, value));
@@ -729,7 +954,7 @@ init_null__JSONValue()
 	};
 }
 
-#define JSON_TO_STRING_HANDLE_ERROR(fncall) if (!fncall) { return false; }
+#define JSON_TO_STRING_HANDLE_ERROR(fncall) if (!(fncall)) { return false; }
 
 bool
 convert_number_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res)
@@ -827,17 +1052,22 @@ convert_object_value_to_string__JSONValue(const JSONValue *self, JSONValueString
 {
 	JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '{'));
 
-	size_t object_len = self->object.map.len;
+	bool need_comma = false;
 
-	for (size_t i = 0; i < object_len; ++i) {
-		const JSONValueObjectKeyValue *key_value = &self->object.map.buffer[i];
+	for (size_t i = 0; i < self->object.map.capacity; ++i) {
+		const JSONValueObjectBucket *current_bucket = self->object.map.buckets[i];
 
-		JSON_TO_STRING_HANDLE_ERROR(push_characters__JSONValueString(res, key_value->key.buffer, key_value->key.len));
-		JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ':'));
-		JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(key_value->value, res));
+		while (current_bucket) {
+			if (need_comma) {
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
+			}
 
-		if (i + 1 != object_len) {
-			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
+			JSON_TO_STRING_HANDLE_ERROR(push_characters__JSONValueString(res, current_bucket->pair.key.buffer, current_bucket->pair.key.len));
+			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ':'));
+			JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(current_bucket->pair.value, res));
+
+			current_bucket = current_bucket->next;
+			need_comma = true;
 		}
 	}
 
@@ -1039,11 +1269,16 @@ parse_object_member_value__JSON(struct JSONContentIterator *iter, JSONValueObjec
 	const JSONValue *name = unwrap__JSONValueResult(&name_result);
 	const JSONValue *value = unwrap__JSONValueResult(&value_result);
 
-	if (!add_member__JSONValueObject(object, name->string, *value)) {
-		return PARSE_OBJECT_OUT_OF_MEMORY;
+	switch (add_member__JSONValueObject(object, name->string, *value)) {
+		case OBJECT_KEY_VALUE_MAP_NO_ERROR:
+			return PARSE_OBJECT_NO_ERROR;
+		case OBJECT_KEY_VALUE_MAP_OUT_OF_MEMORY:
+			return PARSE_OBJECT_OUT_OF_MEMORY;
+		case OBJECT_KEY_VALUE_MAP_DUPLICATE_KEY:
+			return PARSE_OBJECT_DUPLICATE_KEY;
+		default:
+			UNREACHABLE("Unknown status");
 	}
-
-	return PARSE_OBJECT_NO_ERROR;
 }
 
 JSONValueResult
@@ -1098,6 +1333,8 @@ handle_err:
 			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Invalid member value");
 		case PARSE_OBJECT_OUT_OF_MEMORY:
 			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_OUT_OF_MEMORY, "Out of memory");
+		case PARSE_OBJECT_DUPLICATE_KEY:
+			return init_err__JSONValueResult(JSON_VALUE_RESULT_ERROR_PARSE_FAILED, "Duplicated key");
 		default:
 			UNREACHABLE("Unknown error");
 	}
@@ -1449,6 +1686,7 @@ parse_value__JSON(struct JSONContentIterator *iter)
 			return parse_object_value__JSON(iter);
 		case '"':
 			return parse_string_value__JSON(iter);
+		case '-':
 		case '0':
 		case '1':
 		case '2':

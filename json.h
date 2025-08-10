@@ -30,8 +30,13 @@ typedef struct JSONValueObjectKeyValue {
 	struct JSONValue *value;
 } JSONValueObjectKeyValue;
 
+typedef struct JSONValueObjectBucket {
+	JSONValueObjectKeyValue pair;
+	struct JSONValueObjectBucket *next;
+} JSONValueObjectBucket;
+
 typedef struct JSONValueObjectKeyValueMap {
-	JSONValueObjectKeyValue *buffer;
+	JSONValueObjectBucket **buckets;
 	size_t len;
 	size_t capacity;
 } JSONValueObjectKeyValueMap;
