@@ -66,9 +66,6 @@ push_characters__JSONValueString(JSONValueString *self, char *s, size_t s_len);
 static inline bool
 is_empty__JSONValueString(const JSONValueString *self);
 
-static void
-to_string__JSONValueString(const JSONValueString *self, JSONValueString *res);
-
 static inline void
 deinit__JSONValueString(const JSONValueString *self);
 
@@ -123,7 +120,25 @@ init_object__JSONValue(JSONValueObject object);
 static inline JSONValue
 init_null__JSONValue();
 
-static void
+static inline bool
+convert_number_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res);
+
+static bool
+convert_string_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res);
+
+static inline bool
+convert_boolean_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res);
+
+static bool
+convert_array_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res);
+
+static bool
+convert_object_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res);
+
+static inline bool
+convert_null_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res);
+
+static bool
 to_string_base__JSONValue(const JSONValue *self, JSONValueString *res);
 
 static void
@@ -533,63 +548,6 @@ is_empty__JSONValueString(const JSONValueString *self)
 }
 
 void
-to_string__JSONValueString(const JSONValueString *self, JSONValueString *res)
-{
-	push__JSONValueString(res, '"');
-
-	for (size_t i = 0; i < self->len; ++i) {
-		unsigned char current = self->buffer[i] & 0xFF;
-
-		switch (current) {
-			case '\"':
-				push__JSONValueString(res, '\\');
-				push__JSONValueString(res, '"');
-
-				break;
-			case '\\':
-				push__JSONValueString(res, '\\');
-				push__JSONValueString(res, '\\');
-
-				break;
-			case '/':
-				push__JSONValueString(res, '\\');
-				push__JSONValueString(res, '/');
-
-				break;
-			case '\b':
-				push__JSONValueString(res, '\\');
-				push__JSONValueString(res, 'b');
-
-				break;
-			case '\f':
-				push__JSONValueString(res, '\\');
-				push__JSONValueString(res, 'f');
-
-				break;
-			case '\n':
-				push__JSONValueString(res, '\\');
-				push__JSONValueString(res, 'n');
-
-				break;
-			case '\r':
-				push__JSONValueString(res, '\\');
-				push__JSONValueString(res, 'r');
-
-				break;
-			case '\t':
-				push__JSONValueString(res, '\\');
-				push__JSONValueString(res, 't');
-
-				break;
-			default:
-				push_character__JSONValueString(res, current);
-		}
-	}
-
-	push__JSONValueString(res, '"');
-}
-
-void
 deinit__JSONValueString(const JSONValueString *self)
 {
 	free(self->buffer);
@@ -771,68 +729,145 @@ init_null__JSONValue()
 	};
 }
 
-void
+#define JSON_TO_STRING_HANDLE_ERROR(fncall) if (!fncall) { return false; }
+
+bool
+convert_number_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res)
+{
+	return push_characters__JSONValueString(res, self->number.buffer, self->number.len);
+}
+
+bool
+convert_string_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res)
+{
+	JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
+
+	for (size_t i = 0; i < self->string.len; ++i) {
+		unsigned char current = self->string.buffer[i] & 0xFF;
+
+		switch (current) {
+			case '\"':
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
+
+				break;
+			case '\\':
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+
+				break;
+			case '/':
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '/'));
+
+				break;
+			case '\b':
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'b'));
+
+				break;
+			case '\f':
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'f'));
+
+				break;
+			case '\n':
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'n'));
+
+				break;
+			case '\r':
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'r'));
+
+				break;
+			case '\t':
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 't'));
+
+				break;
+			default:
+				JSON_TO_STRING_HANDLE_ERROR(push_character__JSONValueString(res, current));
+		}
+	}
+
+	return push__JSONValueString(res, '"');
+}
+
+bool
+convert_boolean_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res)
+{
+	if (self->boolean) {
+		return push_characters__JSONValueString(res, "true", 4);
+	}
+	
+	return push_characters__JSONValueString(res, "false", 5);
+}
+
+bool
+convert_array_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res)
+{
+	JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '['));
+
+	size_t array_len = self->array.len;
+
+	for (size_t i = 0; i < self->array.len; ++i) {
+		JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(&self->array.buffer[i], res));
+
+		if (i + 1 != array_len) {
+			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
+		}
+	}
+
+	return push__JSONValueString(res, ']');
+}
+
+bool
+convert_object_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res)
+{
+	JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '{'));
+
+	size_t object_len = self->object.map.len;
+
+	for (size_t i = 0; i < object_len; ++i) {
+		const JSONValueObjectKeyValue *key_value = &self->object.map.buffer[i];
+
+		JSON_TO_STRING_HANDLE_ERROR(push_characters__JSONValueString(res, key_value->key.buffer, key_value->key.len));
+		JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ':'));
+		JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(key_value->value, res));
+
+		if (i + 1 != object_len) {
+			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
+		}
+	}
+
+	return push__JSONValueString(res, '}');
+}
+
+bool
+convert_null_value_to_string__JSONValue(const JSONValue *self, JSONValueString *res)
+{
+	return push_characters__JSONValueString(res, "null", 4);
+}
+
+#undef JSON_TO_STRING_HANDLE_ERROR
+
+bool
 to_string_base__JSONValue(const JSONValue *self, JSONValueString *res)
 {
 	switch (self->kind) {
 		case JSON_VALUE_KIND_NUMBER:
-			push_characters__JSONValueString(res, self->number.buffer, self->number.len);
-
-			break;
+			return convert_number_value_to_string__JSONValue(self, res);
 		case JSON_VALUE_KIND_STRING:
-			to_string__JSONValueString(&self->string, res);
-
-			break;
+			return convert_string_value_to_string__JSONValue(self, res);
 		case JSON_VALUE_KIND_BOOLEAN:
-			if (self->boolean) {
-				push_characters__JSONValueString(res, "true", 4);
-			} else {
-				push_characters__JSONValueString(res, "false", 5);
-			}
-
-			break;
-		case JSON_VALUE_KIND_ARRAY: {
-			push__JSONValueString(res, '[');
-
-			size_t array_len = self->array.len;
-
-			for (size_t i = 0; i < self->array.len; ++i) {
-				to_string_base__JSONValue(&self->array.buffer[i], res);
-
-				if (i + 1 != array_len) {
-					push__JSONValueString(res, ',');
-				}
-			}
-
-			push__JSONValueString(res, ']');
-
-			break;
-		}
-		case JSON_VALUE_KIND_OBJECT: {
-			push__JSONValueString(res, '{');
-
-			size_t object_len = self->object.map.len;
-
-			for (size_t i = 0; i < object_len; ++i) {
-				const JSONValueObjectKeyValue *key_value = &self->object.map.buffer[i];
-
-				push_characters__JSONValueString(res, key_value->key.buffer, key_value->key.len);
-				push__JSONValueString(res, ':');
-				to_string_base__JSONValue(key_value->value, res);
-
-				if (i + 1 != object_len) {
-					push__JSONValueString(res, ',');
-				}
-			}
-
-			push__JSONValueString(res, '}');
-
-			break;
-		}
+			return convert_boolean_value_to_string__JSONValue(self, res);
+		case JSON_VALUE_KIND_ARRAY:
+			return convert_array_value_to_string__JSONValue(self, res);
+		case JSON_VALUE_KIND_OBJECT:
+			return convert_object_value_to_string__JSONValue(self, res);
 		case JSON_VALUE_KIND_NULL:
-			push_characters__JSONValueString(res, "null", 4);
-
-			break;
+			return convert_null_value_to_string__JSONValue(self, res);
 		default:
 			UNREACHABLE("Unknown value");
 	}
@@ -843,7 +878,11 @@ to_string__JSONValue(const JSONValue *self)
 {
 	JSONValueString res = init__JSONValueString();
 
-	to_string_base__JSONValue(self, &res);
+	if (!to_string_base__JSONValue(self, &res)) {
+		deinit__JSONValueString(&res);
+
+		return NULL;
+	}
 
 	return res.buffer;
 }
