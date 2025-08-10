@@ -31,7 +31,7 @@ static unsigned char
 current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t byte_count);
 
 static uint8_t
-count_byte__JSONContentIterator(struct JSONContentIterator *self);
+get_codepoint_len_from_first_byte__JSONContentIterator(struct JSONContentIterator *self);
 
 static uint32_t
 read_bytes__JSONContentIterator(struct JSONContentIterator *self, unsigned char (*get_character)(struct JSONContentIterator *self, uint8_t byte_count));
@@ -59,6 +59,9 @@ eq__JSONValueString(const JSONValueString *self, const JSONValueString *other);
 
 static bool
 push__JSONValueString(JSONValueString *self, uint32_t c);
+
+static bool
+push_character__JSONValueString(JSONValueString *self, unsigned char c);
 
 static bool
 push_characters__JSONValueString(JSONValueString *self, char *s, size_t s_len);
@@ -238,8 +241,23 @@ current_character__JSONContentIterator(struct JSONContentIterator *self, uint8_t
 }
 
 uint8_t
-count_byte__JSONContentIterator(struct JSONContentIterator *self)
+get_codepoint_len_from_first_byte__JSONContentIterator(struct JSONContentIterator *self)
 {
+	// See RFC 3629:
+	//
+	// 3.  UTF-8 definition
+	//
+	// [...]
+	//
+	// Char. number range  |        UTF-8 octet sequence
+	//    (hexadecimal)    |              (binary)
+	// --------------------+---------------------------------------------
+	// 0000 0000-0000 007F | 0xxxxxxx
+	// 0000 0080-0000 07FF | 110xxxxx 10xxxxxx
+	// 0000 0800-0000 FFFF | 1110xxxx 10xxxxxx 10xxxxxx
+	// 0001 0000-0010 FFFF | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+	//
+	// [...]
 	unsigned char c1 = current_character__JSONContentIterator(self, 0);
 
 	if ((c1 & 0x80) == 0) {
@@ -307,7 +325,9 @@ read_bytes__JSONContentIterator(struct JSONContentIterator *self, unsigned char 
 uint32_t
 next__JSONContentIterator(struct JSONContentIterator *self)
 {
-	return read_bytes__JSONContentIterator(self, &next_character__JSONContentIterator);
+	self->count += get_codepoint_len_from_first_byte__JSONContentIterator(self);
+
+	return read_bytes__JSONContentIterator(self, &current_character__JSONContentIterator);
 }
 
 uint32_t
@@ -460,6 +480,26 @@ push__JSONValueString(JSONValueString *self, uint32_t c)
 }
 
 bool
+push_character__JSONValueString(JSONValueString *self, unsigned char c)
+{
+	if (!self->buffer) {
+		self->buffer = malloc(self->capacity);
+	} else if (self->len + 1 >= self->capacity) {
+		self->capacity *= 2;
+		self->buffer = realloc(self->buffer, self->capacity);
+	}
+
+	if (!self->buffer) {
+		return false;
+	}
+
+	self->buffer[self->len++] = c;
+	self->buffer[self->len] = 0;
+
+	return true;
+}
+
+bool
 push_characters__JSONValueString(JSONValueString *self, char *s, size_t s_len)
 {
 	size_t new_size = self->len + s_len + 1;
@@ -498,7 +538,7 @@ to_string__JSONValueString(const JSONValueString *self, JSONValueString *res)
 	push__JSONValueString(res, '"');
 
 	for (size_t i = 0; i < self->len; ++i) {
-		char current = self->buffer[i];
+		unsigned char current = self->buffer[i] & 0xFF;
 
 		switch (current) {
 			case '\"':
@@ -542,8 +582,7 @@ to_string__JSONValueString(const JSONValueString *self, JSONValueString *res)
 
 				break;
 			default:
-				// TODO: Translate non-ascii characters to \uXXXX
-				push__JSONValueString(res, current);
+				push_character__JSONValueString(res, current);
 		}
 	}
 
