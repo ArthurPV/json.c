@@ -73,10 +73,10 @@ static bool
 expect_characters__JSONContentIterator(struct JSONContentIterator *self, char *expected, size_t expected_len);
 
 struct SipHashState {
-	size_t v0;
-	size_t v1;
-	size_t v2;
-	size_t v3;
+	uint64_t v0;
+	uint64_t v1;
+	uint64_t v2;
+	uint64_t v3;
 };
 
 static void
@@ -85,7 +85,7 @@ mix__SipHashState(struct SipHashState *self);
 static void
 final__SipHashState(struct SipHashState *self, size_t len);
 
-static size_t
+static uint64_t
 hash__SipHashState(const void *key, size_t key_len, size_t k0, size_t k1);
 
 static inline JSONValueString
@@ -490,7 +490,7 @@ final__SipHashState(struct SipHashState *self, size_t len)
 	}
 }
 
-size_t
+uint64_t
 hash__SipHashState(const void *key, size_t key_len, const size_t k0, const size_t k1)
 {
 	struct SipHashState state = {
