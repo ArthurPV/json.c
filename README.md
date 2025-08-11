@@ -11,6 +11,10 @@ cmake .. -G Ninja
 ninja
 ```
 
+## Example
+
+Checkout the file [test.c](./test.c) for an example.
+
 ## References
 
 - [RFC 8259](https://datatracker.ietf.org/doc/html/rfc8259) 
