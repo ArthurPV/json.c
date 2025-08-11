@@ -1088,7 +1088,9 @@ convert_object_value_to_string__JSONValue(const JSONValue *self, JSONValueString
 				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
 			}
 
+			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
 			JSON_TO_STRING_HANDLE_ERROR(push_characters__JSONValueString(res, current_bucket->pair.key.buffer, current_bucket->pair.key.len));
+			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
 			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ':'));
 			JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(current_bucket->pair.value, res));
 
