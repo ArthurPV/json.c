@@ -993,52 +993,54 @@ convert_string_value_to_string__JSONValue(const JSONValue *self, JSONValueString
 {
 	JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
 
-	for (size_t i = 0; i < self->string.len; ++i) {
-		unsigned char current = self->string.buffer[i] & 0xFF;
+	if (self->string.buffer) {
+		for (size_t i = 0; i < self->string.len; ++i) {
+			unsigned char current = self->string.buffer[i] & 0xFF;
 
-		switch (current) {
-			case '\"':
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
+			switch (current) {
+				case '\"':
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
 
-				break;
-			case '\\':
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					break;
+				case '\\':
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
 
-				break;
-			case '/':
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '/'));
+					break;
+				case '/':
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '/'));
 
-				break;
-			case '\b':
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'b'));
+					break;
+				case '\b':
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'b'));
 
-				break;
-			case '\f':
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'f'));
+					break;
+				case '\f':
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'f'));
 
-				break;
-			case '\n':
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'n'));
+					break;
+				case '\n':
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'n'));
 
-				break;
-			case '\r':
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'r'));
+					break;
+				case '\r':
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 'r'));
 
-				break;
-			case '\t':
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 't'));
+					break;
+				case '\t':
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '\\'));
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, 't'));
 
-				break;
-			default:
-				JSON_TO_STRING_HANDLE_ERROR(push_character__JSONValueString(res, current));
+					break;
+				default:
+					JSON_TO_STRING_HANDLE_ERROR(push_character__JSONValueString(res, current));
+			}
 		}
 	}
 
@@ -1062,11 +1064,13 @@ convert_array_value_to_string__JSONValue(const JSONValue *self, JSONValueString 
 
 	size_t array_len = self->array.len;
 
-	for (size_t i = 0; i < self->array.len; ++i) {
-		JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(&self->array.buffer[i], res));
+	if (self->array.buffer) {
+		for (size_t i = 0; i < self->array.len; ++i) {
+			JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(&self->array.buffer[i], res));
 
-		if (i + 1 != array_len) {
-			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
+			if (i + 1 != array_len) {
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
+			}
 		}
 	}
 
@@ -1080,22 +1084,24 @@ convert_object_value_to_string__JSONValue(const JSONValue *self, JSONValueString
 
 	bool need_comma = false;
 
-	for (size_t i = 0; i < self->object.map.capacity; ++i) {
-		const JSONValueObjectBucket *current_bucket = self->object.map.buckets[i];
+	if (self->object.map.buckets) {
+		for (size_t i = 0; i < self->object.map.capacity; ++i) {
+			const JSONValueObjectBucket *current_bucket = self->object.map.buckets[i];
 
-		while (current_bucket) {
-			if (need_comma) {
-				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
+			while (current_bucket) {
+				if (need_comma) {
+					JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ','));
+				}
+
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
+				JSON_TO_STRING_HANDLE_ERROR(push_characters__JSONValueString(res, current_bucket->pair.key.buffer, current_bucket->pair.key.len));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
+				JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ':'));
+				JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(current_bucket->pair.value, res));
+
+				current_bucket = current_bucket->next;
+				need_comma = true;
 			}
-
-			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
-			JSON_TO_STRING_HANDLE_ERROR(push_characters__JSONValueString(res, current_bucket->pair.key.buffer, current_bucket->pair.key.len));
-			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, '"'));
-			JSON_TO_STRING_HANDLE_ERROR(push__JSONValueString(res, ':'));
-			JSON_TO_STRING_HANDLE_ERROR(to_string_base__JSONValue(current_bucket->pair.value, res));
-
-			current_bucket = current_bucket->next;
-			need_comma = true;
 		}
 	}
 
